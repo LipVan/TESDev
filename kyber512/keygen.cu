@@ -1,5 +1,4 @@
 #include "keygen.h"
-#include "common.h"
 
 __global__ void keyGenKer(int16_t *t, int16_t *matrix_A, int16_t *s, int16_t *e, uint8_t *seed)
 {
@@ -26,6 +25,8 @@ __global__ void keyGenKer(int16_t *t, int16_t *matrix_A, int16_t *s, int16_t *e,
 		GensreDev(e+tid*KYBER_K*KYBER_N, rho_sigma+32, nounce);
 		++nounce;
 	}
+	__syncthreads();
+
 }
 
 void keyGenCKer(uint8_t *pk, uint8_t *sk)
