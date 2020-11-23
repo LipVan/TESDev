@@ -1,5 +1,10 @@
 #include "keygen.h"
 
+__global__ void nttVecKer()
+{
+
+}
+
 __global__ void keyGenKer(int16_t *t, int16_t *matrix_A, int16_t *s, int16_t *e, uint8_t *seed)
 {
 	int tid = blockDim.x*blockIdx.x + threadIdx.x;
@@ -26,6 +31,9 @@ __global__ void keyGenKer(int16_t *t, int16_t *matrix_A, int16_t *s, int16_t *e,
 		++nounce;
 	}
 	__syncthreads();
+
+	//Raw NTT for the vectors
+
 
 }
 
