@@ -1,8 +1,20 @@
 #include "keygen.h"
 
-__global__ void nttVecKer()
+//FP32 -> 16x16x8
+//Block_size = 256 -> warps = 8
+//(s,e) -> (^s, ^e), 8 tuples per warp
+__global__ void nttVecKer(float *out_d, float *in_a, float *in_b, float *in_c)
 {
+	__shared__ float shmem[(KYBER_N/4)*KYBER_N];
+	int warp_id = threadIdx.x / WARP_SIZE;
 
+	//4 Rounds
+#pragma unroll
+	for(int round=0; round<4; round++)
+	{
+		//Copy 1/4 Zeta matrix to shared memory
+		for(int i=0; i<)
+	}
 }
 
 __global__ void keyGenKer(int16_t *t, int16_t *matrix_A, int16_t *s, int16_t *e, uint8_t *seed)
