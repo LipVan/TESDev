@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <mma.h>
 
 #include "keccak.h"
 #include "params.h"
@@ -22,6 +23,14 @@
 
 #define BLOCK_SIZE 	256
 #define WARP_SIZE	32
+#define WARPS_PER_BLOCK	(BLOCK_SIZE/WARP_SIZE)
+
+#define WMM_M	16
+#define WMM_N	16
+#define WMM_K	16
+
+#define BASE_BITS	(2^7)
+#define TABLE_OFFSET	(KYBER_N*KYBER_N)
 
 __device__ void CBDEtaDev(int16_t *out_poly, uint8_t *in_B);
 
@@ -30,5 +39,7 @@ __device__ int ParseDev(int16_t *out_poly, uint req_len, uint8_t *bytes, uint by
 __device__ void GenMatrixADev(int16_t *matrixA, uint8_t *rho);
 
 __device__ void GensreDev(int16_t *vec, uint8_t *seed, uint8_t nounce);
+
+__global__ void nttVecI8Ker(int32_t *o_vec, int8_t *i_vec, int8_t *i_tab);
 
 #endif /* COMMON_H_ */

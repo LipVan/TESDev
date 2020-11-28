@@ -9,7 +9,7 @@
 #define KYBER512_NTT_TAB_H_
 
 
-
+int genTab();
 
 
 #endif /* KYBER512_NTT_TAB_H_ */
