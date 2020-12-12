@@ -140,6 +140,12 @@ __device__ void GensreDev(int8_t *vec, uint8_t *seed, uint8_t nounce)
 //	}
 //}
 
+#define WARP_A_ROW_TILES	4
+#define WARP_B_COL_TILES	2
+#define ROUNDS				((BLOCK_SIZE/WMM_M)/WARP_A_ROW_TILES)
+#define ITERATIONS			(KYBER_N/WMM_K)
+
+//Block_size 256
 __global__ void nttVecI8Ker(int32_t *o_vec, int8_t *i_vec, int8_t *i_tabg)
 {
 	//Perhaps the shared memory is not enough for KYBER_N*KYBER_N = 64 kB
@@ -149,63 +155,111 @@ __global__ void nttVecI8Ker(int32_t *o_vec, int8_t *i_vec, int8_t *i_tabg)
 
 	int warp_id = threadIdx.x / WARP_SIZE;
 
-	wmma::fragment<wmma::matrix_a, WMM_M, WMM_N, WMM_K, char, wmma::row_major> a_frag;
-	wmma::fragment<wmma::matrix_b, WMM_M, WMM_N, WMM_K, char, wmma::row_major> b_frag;
-	wmma::fragment<wmma::accumulator, WMM_M, WMM_N, WMM_K, int> c_frag[2];
-
-	for(int i=0; i<2; ++i)
-	{
-		wmma::fill_fragment(c_frag[i], 0);
-	}
-
-	//c0 = a0 * b0
-	for(int round=0; round<KYBER_N/WMM_N; ++round)
-	{
-		int8_t *a_warp_ptr = (int8_t *)i_vec + round*WMM_N;
-
-		wmma::load_matrix_sync(a_frag, a_warp_ptr, KYBER_N);
+	wmma::fragment<wmma::matrix_a, WMM_M, WMM_N, WMM_K, char, wmma::row_major> a_frag[WARP_A_ROW_TILES];
+	wmma::fragment<wmma::matrix_b, WMM_M, WMM_N, WMM_K, char, wmma::row_major> b_frag[WARP_B_COL_TILES];
+	wmma::fragment<wmma::accumulator, WMM_M, WMM_N, WMM_K, int> c_frag[WARP_A_ROW_TILES][WARP_B_COL_TILES];
 
 #pragma unroll
-		for(int ind=0; ind<2; ++ind)
+	for(int i=0; i<WARP_A_ROW_TILES; ++i)
+	{
+		for(int j=0; WARP_B_COL_TILES<4; ++WARP_B_COL_TILES)
 		{
-			int8_t *b_warp_ptr = i_tabg + round*WMM_N*KYBER_N + (warp_id*2 + ind)*WMM_K;
-
-			wmma::load_matrix_sync(b_frag, b_warp_ptr , KYBER_N);
-			wmma::mma_sync(c_frag[ind], a_frag, b_frag, c_frag[ind]);
+			wmma::fill_fragment(c_frag[i][j], 0);
 		}
 	}
 
-	//c0 <-- c0*BASE_BITS
-	for(int ind=0; ind<2; ++ind)
+	for(int round=0; round<ROUNDS; ++round)
 	{
-		for(int t=0; t<c_frag[ind].num_elements; ++t)
+		//for G[1]
+		for(int ite=0; ite<ITERATIONS; ++ite)
 		{
-			c_frag[ind].x[t] *= BASE_BITS;
-		}
-	}
+			//Load input matrix to fragment
+#pragma unroll
+			for(int row=0; row<WARP_A_ROW_TILES; ++row)
+			{
+				char *a_warp_ptr = (char *)i_vec + ite*WMM_K + round*WARP_A_ROW_TILES*WMM_M*KYBER_N;
+				wmma::load_matrix_sync(a_frag[row], a_warp_ptr + row*WMM_M*KYBER_N, KYBER_N);
+			}
 
-	//c1 <- a1 * b1 + c0
-	for(int round=0; round<KYBER_N/WMM_N; ++round)
-	{
-		int8_t *a_warp_ptr = (int8_t *)i_vec + round*WMM_N;
-		wmma::load_matrix_sync(a_frag, a_warp_ptr, KYBER_N);
+			//Load pre table g to fragment
+#pragma unroll
+			for(int col=0; col<WARP_B_COL_TILES; ++col)
+			{
+				char *b_warp_ptr = (char *)i_tabg + warp_id * WMM_N * WARP_B_COL_TILES + ite*WMM_M*KYBER_N;
+				wmma::load_matrix_sync(b_frag[col], b_warp_ptr + col*WMM_N, KYBER_N);
+			}
+
+			//Perform MMA
+#pragma unroll
+			for(int row=0; row<WARP_A_ROW_TILES; ++row)
+			{
+#pragma unroll
+				for(int col=0; col<WARP_B_COL_TILES; ++col)
+				{
+					wmma::mma_sync(c_frag[row][col], a_frag[row], b_frag[col]);
+				}
+			}
+		}
+
+		//Left move BASE_BITS
+#pragma unroll
+		for(int row=0; row<WARP_A_ROW_TILES; ++row)
+#pragma unroll
+			for(int col=0; col<WARP_B_COL_TILES; ++col)
+			{
+				for(int t=0; t<c_frag[row][col].num_elements; ++t)
+					c_frag[row][col].x[t] <<= BASE_BITS;
+			}
+
+		//for G[0]
+		for(int ite=0; ite<ITERATIONS; ++ite)
+		{
+			//Load input matrix to fragment
+#pragma unroll
+			for(int row=0; row<WARP_A_ROW_TILES; ++row)
+			{
+				char *a_warp_ptr = (char *)i_vec + ite*WMM_K + round*WARP_A_ROW_TILES*WMM_M*KYBER_N;
+				wmma::load_matrix_sync(a_frag[row], a_warp_ptr + row*WMM_M*KYBER_N, KYBER_N);
+			}
+
+			//Load pre table g to fragment
+#pragma unroll
+			for(int col=0; col<WARP_B_COL_TILES; ++col)
+			{
+				char *b_warp_ptr = (char *)i_tabg + warp_id * WMM_N * WARP_B_COL_TILES + ite*WMM_M*KYBER_N + KYBER_N*KYBER_N;
+				wmma::load_matrix_sync(b_frag[col], b_warp_ptr + col*WMM_N, KYBER_N);
+			}
+
+			//Perform MMA
+#pragma unroll
+			for(int row=0; row<WARP_A_ROW_TILES; ++row)
+			{
+#pragma unroll
+				for(int col=0; col<WARP_B_COL_TILES; ++col)
+				{
+					wmma::mma_sync(c_frag[row][col], a_frag[row], b_frag[col]);
+				}
+			}
+		}
+
+		//Module q
+//#pragma unroll
+//		for(int row=0; row<WARP_A_ROW_TILES; ++row)
+//#pragma unroll
+//			for(int col=0; col<WARP_B_COL_TILES; ++col)
+//#pragma unroll
+//				for(int t=0; t<c_frag[row][col].num_elements; ++t)
+//					c_frag[row][col].x[t] %= KYBER_Q;
+		//c_frag[row][col].x[t] -= (c_frag[row][col].x[t] >> 12) * KYBER_Q; //Burrett Reduction
+		__syncthreads();
 
 #pragma unroll
-		for(int ind=0; ind<2; ++ind)
-		{
-			int8_t *b_warp_ptr = (int8_t *)i_tabg + TABLE_OFFSET + round*WMM_N*KYBER_N + (warp_id*2 + ind)*WMM_K;
-
-			wmma::load_matrix_sync(b_frag, b_warp_ptr, KYBER_N);
-			wmma::mma_sync(c_frag[ind], a_frag, b_frag, c_frag[ind]);
-		}
+		for(int row=0; row<WARP_A_ROW_TILES; ++row)
+#pragma unroll
+			for(int col=0; col<WARP_B_COL_TILES; ++col)
+			{
+				int32_t * c_warp_ptr = (int32_t *)o_vec + (round*WARP_A_ROW_TILES + row)*WMM_M*KYBER_N;		//hang
+				wmma::store_matrix_sync(c_warp_ptr, c_warp_ptr + (warp_id*WARP_B_COL_TILES + col)*WMM_N, KYBER_N);	//lie
+			}
 	}
-
-	//Store the result
-	for(int ind=0; ind<2; ++ind)
-	{
-		int *o_warp_ptr = o_vec + (warp_id*2 + ind)*WMM_K;
-
-		wmma::store_matrix_sync(o_warp_ptr, c_frag[ind], KYBER_N);
-	}
-//	__syncthreads();
 }

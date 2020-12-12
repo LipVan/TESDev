@@ -18,16 +18,23 @@
 #include "keccak.h"
 #include "params.h"
 #include "rng.h"
+#include "zeta_table.h"
 
-#define TEST_CASES	10240
-
+#define GRID_SIZE	(46*2)
 #define BLOCK_SIZE 	256
+
+#define TEST_ROUNDS	10
+#define TEST_CASES	(TEST_ROUNDS * GRID_SIZE * BLOCK_SIZE)
+
 #define WARP_SIZE	32
 #define WARPS_PER_BLOCK	(BLOCK_SIZE/WARP_SIZE)
 
 #define WMM_M	16
 #define WMM_N	16
 #define WMM_K	16
+
+#define SKEW_CHAR 		(256/8)
+#define LINE_STRIDE		(KYBER_N + SKEW_CHAR)
 
 #define BASE_BITS	(2^7)
 #define TABLE_OFFSET	(KYBER_N*KYBER_N)

@@ -2,8 +2,12 @@
 
 
 
-__global__ void keyGenKer(int16_t *t, int16_t *matrix_A, int8_t *s, int8_t *e, uint8_t *seed)
+__global__ void keyGenKer(int16_t *t, int16_t *matrix_A, int32_t *sBar, int32_t *eBar,
+						  int8_t *s,  int8_t *e, uint8_t *seed)
 {
+	//32 kB sahred memory 16*2*4*256, with SKEW_CHAR
+	//__shared__ int8_t shmem[32*4][KYBER_N + SKEW_CHAR];
+
 	int tid = blockDim.x*blockIdx.x + threadIdx.x;
 	uint8_t rho_sigma[64];
 
@@ -30,7 +34,19 @@ __global__ void keyGenKer(int16_t *t, int16_t *matrix_A, int8_t *s, int8_t *e, u
 	__syncthreads();
 
 	//Raw NTT for the vectors
-	nttVecI8Ker()
+	nttVecI8Ker(sBar, s, GTab);
+
+	nttVecI8Ker(eBar, e, GTab);
+
+	//tBar = ABar*sBar + eBar
+	for(int i=0; i<KYBER_K; ++i)
+	{
+
+	}
+	for(int i=0; i<KYBER_N; ++i)
+	{
+		int64_t t_tmp = *()
+	}
 
 }
 

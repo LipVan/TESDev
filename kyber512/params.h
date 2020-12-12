@@ -13,6 +13,7 @@
 
 #define KYBER_N			256
 #define KYBER_Q			3329
+#define KYBER_Q_INV		62209	 	//q^(-1) mod 2^16
 #define NINETEEN_Q	(19 * KYBER_Q)
 #define KYBER_ETA		2
 
